@@ -29,21 +29,51 @@ import copy
 import itertools
 import fnmatch
 from jenkins_jobs.errors import JenkinsJobsException
+import copy
+import traceback
+import sys
+import imp
 
 logger = logging.getLogger(__name__)
 MAGIC_MANAGE_STRING = "<!-- Managed by Jenkins Job Builder -->"
 
+def format_item(item, paramdict, eval_params):
+    if not isinstance(item, str):
+        return item
+    
+    match = re.search(r'^{(.*)}$', item)
+    if match:
+        return paramdict.get(match.group(1))
 
-def deep_format(obj, paramdict):
+    ret = item.format(**paramdict)
+    while True:
+        match = re.search(r'(<\?\??)(.*?[^\\])(>)', ret)
+        if not match:
+            break;
+        evalstr = match.group(2).replace(r'\>', '>')
+        try:
+            evalresult = eval(evalstr, globals(), copy.copy(eval_params))
+        except Exception as e:
+            print traceback.format_exc()
+            desc = "Got exception trying to evaluate expression %s. Params are %s" % (
+                   evalstr, eval_params)
+            raise JenkinsJobsException(desc)
+        if match.group(0) == ret and (isinstance(evalresult, dict) or isinstance(evalresult, list)):
+            return evalresult 
+        ret = ret[:match.start(1)] + evalresult + ret[match.end(3):]
+    return ret
+
+def deep_format(obj, paramdict, eval_params):
     """Apply the paramdict via str.format() to all string objects found within
        the supplied obj. Lists and dicts are traversed recursively."""
     # YAML serialisation was originally used to achieve this, but that places
     # limitations on the values in paramdict - the post-format result must
     # still be valid YAML (so substituting-in a string containing quotes, for
     # example, is problematic).
+    
     if isinstance(obj, str):
         try:
-            ret = obj.format(**paramdict)
+            ret = format_item(obj, paramdict, eval_params)
         except KeyError as exc:
             missing_key = exc.message
             desc = "%s parameter missing to format %s\nGiven: %s" % (
@@ -52,15 +82,18 @@ def deep_format(obj, paramdict):
     elif isinstance(obj, list):
         ret = []
         for item in obj:
-            ret.append(deep_format(item, paramdict))
+            formattedItem = deep_format(item, paramdict, eval_params)
+            if isinstance(item, str) and isinstance(formattedItem, list) and item.startswith('<??'):
+                ret.extend(formattedItem)
+            else:
+                ret.append(formattedItem)
     elif isinstance(obj, dict):
         ret = {}
         for item in obj:
-            ret[item.format(**paramdict)] = deep_format(obj[item], paramdict)
+            ret[format_item(item, paramdict, eval_params)] = deep_format(obj[item], paramdict, eval_params)
     else:
         ret = obj
     return ret
-
 
 def matches(what, where):
     """
@@ -75,6 +108,96 @@ def matches(what, where):
     return False
 
 
+class Context(object):
+    def __init__(self, context_name, data, params):
+        self.context_name = context_name
+        self.data = data
+        self.context = self.data.get('context', {}).get(self.context_name, {})
+        self.context_var_name = self.context.get('var-name', '')
+        self.context_var_value = params.get(self.context_var_name, '')
+
+    def get_folded_context(self):
+        folded_configs = self.get_folded_configs()
+        folded_children = self.get_folded_children()
+        folded_parents = self.get_folded_parents()
+                
+        folded_context = {'configs' : folded_configs, 'children' : folded_children, 'parents' : folded_parents}
+        return folded_context
+
+    def fold(self, configs):
+        expanded_configs = deep_format(configs, {self.context_var_name: self.context_var_value}, {})
+        folded_configs = {}
+        if expanded_configs:
+            for k, v in expanded_configs.items():
+                value = v.get(self.context_var_value)
+                if value == None:
+                    value = v.get('default')
+                folded_configs[k] = value
+        return folded_configs
+    
+    def get_folded_configs(self):
+        configs = self.context.get('configs', {})
+        folded_configs = self.fold(configs)
+        return folded_configs
+        
+    def get_folded_child(self, child_name, child_configs):
+        folded_child = self.fold(child_configs)
+        if folded_child.get(self.context_var_name) == None:
+            folded_child[self.context_var_name] = self.context_var_value
+        child_context = Context(child_name, self.data, {self.context_var_name: folded_child[self.context_var_name]})
+        folded_child.update(child_context.get_folded_configs())
+        folded_child['children'] = child_context.get_folded_children()
+        return folded_child
+        
+    def get_folded_children(self):
+        children = self.context.get('children', {})
+        folded_children = {}
+        for child_name, child_configs in children.items():
+            folded_child = self.get_folded_child(child_name, child_configs)
+            folded_children[child_name] = folded_child
+        return folded_children
+            
+    def get_parent_contexts(self):
+        parent_contexts = {}
+        all_contexts = self.data.get('context', {})
+        for context_name, context in all_contexts.items():
+            for child_name in context.get('children', {}).keys():
+                if child_name == self.context_name:
+                    parent_contexts[context_name] = context
+        return parent_contexts
+    
+    def get_parent_context_var_values(self, parent_context):
+        child_configs = parent_context['children'][self.context_name]
+        context_var_value_mapping = child_configs.get(self.context_var_name) if child_configs else None
+        
+        parent_context_var_values = []
+        if context_var_value_mapping:
+            for k, v in context_var_value_mapping.items():
+                if v == self.context_var_value:
+                    parent_context_var_values.append(k)
+        else:
+            parent_context_var_values.append(self.context_var_value)
+        return parent_context_var_values
+
+    def get_folded_parent(self, parent_context_name, parent_context, parent_context_var_value):
+        parent_context = Context(parent_context_name, self.data, {self.context_var_name : parent_context_var_value})
+        folded_parent_configs = parent_context.get_folded_configs()
+        folded_parent_configs[self.context_var_name] = parent_context_var_value
+        folded_parent_configs['parents'] = parent_context.get_folded_parents()
+        return folded_parent_configs
+        
+    def get_folded_parents(self):
+        folded_parents = {}
+        for parent_context_name, parent_context in self.get_parent_contexts().items():
+            parent_context_var_values = self.get_parent_context_var_values(parent_context)
+            if parent_context_var_values:
+                folded_parent_list = []
+                for parent_context_var_value in parent_context_var_values:
+                    folded_parent = self.get_folded_parent(parent_context_name, parent_context, parent_context_var_value)
+                    folded_parent_list.append(folded_parent)
+                folded_parents[parent_context_name] = folded_parent_list
+        return folded_parents
+    
 class YamlParser(object):
     def __init__(self, config=None):
         self.registry = ModuleRegistry(config)
@@ -100,7 +223,7 @@ class YamlParser(object):
                 name = dfn['name']
                 group[name] = dfn
                 self.data[cls] = group
-
+    
     def getJob(self, name):
         job = self.data.get('job', {}).get(name, None)
         if not job:
@@ -139,6 +262,7 @@ class YamlParser(object):
                 continue
             logger.debug("XMLifying job '{0}'".format(job['name']))
             job = self.applyDefaults(job)
+            job = deep_format(job, {}, {})
             self.getXMLForJob(job)
         for project in self.data.get('project', {}).values():
             logger.debug("XMLifying project '{0}'".format(project['name']))
@@ -199,7 +323,11 @@ class YamlParser(object):
         for values in itertools.product(*dimensions):
             params = copy.deepcopy(project)
             params.update(values)
-            expanded = deep_format(template, params)
+            context_name = template.get('context', '')
+            context_name = context_name.format(**params)
+            context = Context(context_name, self.data, params)
+            context_vars = context.get_folded_context()
+            expanded = deep_format(template, params, context_vars)
 
             # Keep track of the resulting expansions to avoid
             # regenerating the exact same job.  Whenever a project has
@@ -300,7 +428,7 @@ class ModuleRegistry(object):
         See the Publishers module for a simple example of how to use
         this method.
         """
-
+                
         if component_type not in self.modules_by_component_type:
             raise JenkinsJobsException("Unknown component type: "
                                        "'{0}'.".format(component_type))
@@ -311,12 +439,6 @@ class ModuleRegistry(object):
         if isinstance(component, dict):
             # The component is a sigleton dictionary of name: dict(args)
             name, component_data = component.items()[0]
-            if template_data:
-                # Template data contains values that should be interpolated
-                # into the component definition
-                s = yaml.dump(component_data, default_flow_style=False)
-                s = s.format(**template_data)
-                component_data = yaml.load(s)
         else:
             # The component is a simple string name, eg "run-tests"
             name = component
@@ -332,7 +454,10 @@ class ModuleRegistry(object):
             # Otherwise, see if it's defined as a macro
             component = parser.data.get(component_type, {}).get(name)
             if component:
-                for b in component[component_list_type]:
+                expanded = component[component_list_type]
+                if component_data:
+                    expanded = deep_format(component[component_list_type], component_data, {})
+                for b in expanded:
                     # Pass component_data in as template data to this function
                     # so that if the macro is invoked with arguments,
                     # the arguments are interpolated into the real defn.
@@ -451,13 +576,18 @@ class Builder(object):
         if os.path.isdir(fn):
             files_to_process = [os.path.join(fn, f)
                                 for f in os.listdir(fn)
-                                if (f.endswith('.yml') or f.endswith('.yaml'))]
+                                if (f.endswith('.yml') or f.endswith('.yaml') or f.endswith('.py'))]
         else:
             files_to_process = [fn]
         self.parser = YamlParser(self.global_config)
         for in_file in files_to_process:
-            logger.debug("Parsing YAML file {0}".format(in_file))
-            self.parser.parse(in_file)
+            if in_file.endswith('.yml') or in_file.endswith('.yaml'):
+                logger.debug("Parsing YAML file {0}".format(in_file))
+                self.parser.parse(in_file)
+            else:
+                logger.debug("Loading python file {0}".format(in_file))
+                module_name = os.path.splitext(os.path.basename(in_file))[0]
+                globals()[module_name] = imp.load_source(module_name, in_file)
 
     def delete_old_managed(self, keep):
         jobs = self.jenkins.get_jobs()
