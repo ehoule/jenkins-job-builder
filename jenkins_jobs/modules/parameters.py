@@ -439,6 +439,56 @@ def dynamic_scriptler_param_common(parser, xml_parent, data, ptype):
         'read-only', False)).lower()
 
 
+def list_maven_artifact_versions(parser, xml_parent, data):
+    """yaml: list-maven-artifact-versions
+    Adds a build parameter that presents versions of an artifact from a maven repository as a drop down list.
+    Requires the Jenkins `Maven Metadata Plugin
+    <https://wiki.jenkins-ci.org/display/JENKINS/Maven+Metadata+Plugin>`_
+
+    :arg str name: the name of the parameter
+    :arg str description: a description of the parameter (optional)
+    :arg str repo-base-url: Base url of repository
+    :arg str group-id: Artifact group id
+    :arg str artifact-id: Artifact id
+    :arg str packaging: Artifact packaging
+    :arg str default-value: For features such as SVN polling a default value is required. If job will only be started manually, this field is not necessary. (optional)
+    :arg str versions-filter: Specify a regular expression which will be used to filter the versions which are actually displayed when triggering a new build.  (optional)
+    :arg str sort-order: Sort order (optional, defaults to DESC)
+    :arg str max-versions: The maximum number of versions to display in the drop-down. Any non-number value as well as 0 or negative values will default to all. (optional, defaults to 5)
+
+    :sort-order values:
+             :ASC: - Ascending
+             :DESC: - Descending
+
+    :default-value There are 4 special default values which will be evaluated at runtime:
+             :FIRST: - Will evaluate to the first item in the drop-down that would have been presented had the build been executed manually.
+             :LAST: - Will evaluate to the last item in the drop-down that would have been presented had the build been executed manually.
+             :RELEASE: - Will evaluate to the version marked as RELEASE in the repository metadata for the configured artifact. The versionFilter even if defined is ignored for this default value.
+             :LATEST: - Will evaluate to the version marked as LATEST in the repository metadata for the configured artifact. The versionFilter even if defined is ignored for this default value.
+
+    Example::
+
+      parameters:
+        - list-maven-artifact-versions:
+            name: VERSION
+            repo-base-url: http://artifactory:8081/artifactory/libs-release-local
+            group-id: com.example
+            artifact-id: foo
+            packaging: war
+    """
+    pdef = base_param(parser, xml_parent, data, False,
+                      'eu.markov.jenkins.plugin.mvnmeta.MavenMetadataParameterDefinition')
+    pdef.set('plugin', 'maven-metadata-plugin@1.0.0')
+    XML.SubElement(pdef, 'repoBaseUrl').text = data.get('repo-base-url', '')
+    XML.SubElement(pdef, 'groupId').text = data.get('group-id', '')
+    XML.SubElement(pdef, 'artifactId').text = data.get('artifact-id', '')
+    XML.SubElement(pdef, 'packaging').text = data.get('packaging', '')
+    XML.SubElement(pdef, 'defaultValue').text = data.get('default-value', '')
+    XML.SubElement(pdef, 'versionFilter').text = data.get('versions-filter', '')
+    XML.SubElement(pdef, 'sortOrder').text = data.get('sort-order', 'DESC')
+    XML.SubElement(pdef, 'maxVersions').text = data.get('max-versions', '5')
+
+
 class Parameters(jenkins_jobs.modules.base.Base):
     sequence = 21
 

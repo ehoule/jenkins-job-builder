@@ -611,6 +611,10 @@ def conditional_step(parser, xml_parent, data):
                            relative, it will be considered relative to
                            either `workspace`, `artifact-directory`,
                            or `jenkins-home`. Default is `workspace`.
+
+    not                Logical not. Invert the result of the selected condition. Will run if the selected condition would not run.
+    
+                         :negated-condition: Condition to negate
     ================== ====================================================
 
     Example::
@@ -627,9 +631,9 @@ def conditional_step(parser, xml_parent, data):
         JENKINS/Conditional+BuildStep+Plugin
     """
 
-    def build_condition(cdata):
+    def build_condition(cdata, parent_tag, condition_tag):
         kind = cdata['condition-kind']
-        ctag = XML.SubElement(root_tag, condition_tag)
+        ctag = XML.SubElement(parent_tag, condition_tag)
         if kind == "always":
             ctag.set('class',
                      'org.jenkins_ci.plugins.run_condition.core.AlwaysRun')
@@ -678,31 +682,29 @@ def conditional_step(parser, xml_parent, data):
                 basedir_tag.set('class',
                                 'org.jenkins_ci.plugins.run_condition.common.'
                                 'BaseDirectory$JenkinsHome')
+        elif kind == "not":
+            ctag.set('class',
+                     'org.jenkins_ci.plugins.run_condition.logic.Not')
+            build_condition(cdata['negated-condition'], ctag, "condition")
+        return ctag
 
     def build_step(parent, step):
         for edited_node in create_builders(parser, step):
-            if not has_multiple_steps:
-                edited_node.set('class', edited_node.tag)
-                edited_node.tag = 'buildStep'
             parent.append(edited_node)
 
-    cond_builder_tag = 'org.jenkinsci.plugins.conditionalbuildstep.'    \
-        'singlestep.SingleConditionalBuilder'
     cond_builders_tag = 'org.jenkinsci.plugins.conditionalbuildstep.'   \
         'ConditionalBuilder'
     steps = data['steps']
-    has_multiple_steps = len(steps) > 1
 
-    if has_multiple_steps:
-        root_tag = XML.SubElement(xml_parent, cond_builders_tag)
-        steps_parent = XML.SubElement(root_tag, "conditionalbuilders")
-        condition_tag = "runCondition"
-    else:
-        root_tag = XML.SubElement(xml_parent, cond_builder_tag)
-        steps_parent = root_tag
-        condition_tag = "condition"
+    root_tag = XML.SubElement(xml_parent, cond_builders_tag)
+    steps_parent = XML.SubElement(root_tag, "conditionalbuilders")
+    condition_tag = "runCondition"
 
-    build_condition(data)
+    root_tag.set('plugin', 'conditional-buildstep@1.3.1')
+
+    ctag = build_condition(data, root_tag, condition_tag)
+    ctag.set('plugin', 'run-condition@1.0')
+    
     evaluation_classes_pkg = 'org.jenkins_ci.plugins.run_condition'
     evaluation_classes = {
         'fail': evaluation_classes_pkg + '.BuildStepRunner$Fail',
@@ -714,8 +716,9 @@ def conditional_step(parser, xml_parent, data):
     }
     evaluation_class = evaluation_classes[data.get('on-evaluation-failure',
                                                    'fail')]
-    XML.SubElement(root_tag, "runner").set('class',
-                                           evaluation_class)
+    runner_tag = XML.SubElement(root_tag, "runner")
+    runner_tag.set('class', evaluation_class)
+    runner_tag.set('plugin', 'run-condition@1.0')
     for step in steps:
         build_step(steps_parent, step)
 

@@ -314,6 +314,7 @@ def svn(self, xml_parent, data):
       :Repo: * **url** (`str`) -- URL for the repository
              * **basedir** (`str`) -- Location relative to the workspace
                                       root to checkout to (default '.')
+    :arg str excluded-commit-messages: If set, and Jenkins is set to poll for changes, Jenkins will ignore any revisions with commit messages containing any of the given regular expressions when determining if a build needs to be triggered
 
     :workspaceupdater values:
              :wipeworkspace: - deletes the workspace before checking out
@@ -360,6 +361,9 @@ def svn(self, xml_parent, data):
         updaterclass = 'UpdateUpdater'
     XML.SubElement(scm, 'workspaceUpdater', {'class':
                    'hudson.scm.subversion.' + updaterclass})
+    
+    if 'excluded-commit-messages' in data:
+        XML.SubElement(scm, 'excludedCommitMessages').text = data['excluded-commit-messages']
 
 
 def tfs(self, xml_parent, data):

@@ -108,6 +108,8 @@ setuptools.setup(
             'text=jenkins_jobs.modules.parameters:text_param',
             ('validating-string=jenkins_jobs.modules.parameters:'
              'validating_string_param'),
+            ('list-maven-artifact-versions=jenkins_jobs.modules.parameters:'
+			 'list_maven_artifact_versions'),
         ],
         'jenkins_jobs.metadata': [
             'date=jenkins_jobs.modules.metadata:date_metadata',
@@ -139,6 +141,9 @@ setuptools.setup(
             'jabber=jenkins_jobs.modules.publishers:jabber',
             'jacoco=jenkins_jobs.modules.publishers:jacoco',
             'jira=jenkins_jobs.modules.publishers:jira',
+            ('mark-jira-version-as-released=jenkins_jobs.modules.publishers:'
+			 'mark_jira_version_as_released'),
+            'create-jira-version=jenkins_jobs.modules.publishers:create_jira_version',
             'join-trigger=jenkins_jobs.modules.publishers:join_trigger',
             'junit=jenkins_jobs.modules.publishers:junit',
             'logparser=jenkins_jobs.modules.publishers:logparser',
@@ -200,6 +205,8 @@ setuptools.setup(
             'timestamps=jenkins_jobs.modules.wrappers:timestamps',
             ('workspace-cleanup=jenkins_jobs.modules.wrappers:'
              'workspace_cleanup'),
+            ('jira-create-release-notes=jenkins_jobs.modules.wrappers:'
+			 'jira_create_release_notes'),
         ],
         'jenkins_jobs.modules': [
             'builders=jenkins_jobs.modules.builders:Builders',

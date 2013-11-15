@@ -1412,6 +1412,54 @@ def jira(parser, xml_parent, data):
     XML.SubElement(xml_parent, 'hudson.plugins.jira.JiraIssueUpdater')
 
 
+def mark_jira_version_as_released(parser, xml_parent, data):
+    """yaml: mark-jira-version-as-released
+    Modify the given version in JIRA and set it to Released status. 
+    Requires the Jenkins `JIRA Plugin
+    <https://wiki.jenkins-ci.org/display/JENKINS/JIRA+Plugin>`_
+
+    :arg string project-key: Specify the project key. A project key is the all capitals part before the issue number in JIRA.
+    :arg string release: Specify the name of the parameter which will contain the release version. This can reference a build parameter.
+
+    Example::
+
+      publishers:
+        - mark-jira-version-as-released:
+            project-key: PROJECT
+            release: 1.0.0
+    """
+    tag = XML.SubElement(xml_parent, 'hudson.plugins.jira.JiraReleaseVersionUpdater')
+    tag.set('plugin', 'jira@1.39')
+    XML.SubElement(tag, 'jiraProjectKey').text = str(
+        data['project-key'])
+    XML.SubElement(tag, 'jiraRelease').text = str(
+        data['release'])
+
+
+def create_jira_version(parser, xml_parent, data):
+    """yaml: create-jira-version
+    Creates a new version in JIRA.
+    Requires the Jenkins `JIRA Plugin
+    <https://wiki.jenkins-ci.org/display/JENKINS/JIRA+Plugin>`_
+
+    :arg string project-key: Specify the project key. A project key is the all capitals part before the issue number in JIRA.
+    :arg string version: Specify the name of the parameter which will contain the release version. This can reference a build parameter. 
+
+    Example::
+
+      publishers:
+        - create-jira-version:
+            project-key: PROJECT
+            version: 1.0.0
+    """
+    tag = XML.SubElement(xml_parent, 'hudson.plugins.jira.JiraVersionCreator')
+    tag.set('plugin', 'jira@1.39')
+    XML.SubElement(tag, 'jiraVersion').text = str(
+        data['version'])
+    XML.SubElement(tag, 'jiraProjectKey').text = str(
+        data['project-key'])
+
+
 def groovy_postbuild(parser, xml_parent, data):
     """yaml: groovy-postbuild
     Execute a groovy script.

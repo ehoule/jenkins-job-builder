@@ -714,6 +714,38 @@ def pre_scm_buildstep(parser, xml_parent, data):
         for edited_node in create_builders(parser, step):
             bs.append(edited_node)
 
+def jira_create_release_notes(parser, xml_parent, data):
+    """yaml: jira-create-release-notes
+    Generates release notes from a JIRA version.
+    Requires the Jenkins `JIRA Plugin
+    <https://wiki.jenkins-ci.org/display/JENKINS/JIRA+Plugin>`_
+
+    :arg string environment-variable: Specify the environment variable to which the release notes will be stored. This can be used in another build step which supports environments. 
+    :arg string project-key: Specify the project key. A project key is the all capitals part before the issue number in JIRA.
+    :arg string release: Specify the name of the parameter which will contain the release version. This can reference a build parameter.
+    :arg string filter: Apply additional filtering criteria to the issue filter. This will be concatenated with an AND operator.
+
+      Defaults To:
+        'status in (Released, Closed)'
+    Example::
+
+      publishers:
+        - jira-create-release-notes:
+            environment-variable: RELEASE_NOTES
+            project-key: PROJECT
+            release: 1.0.0
+    """
+    twrapper = XML.SubElement(xml_parent,
+                              'hudson.plugins.jira.JiraCreateReleaseNotes')
+    twrapper.set('plugin', 'jira@1.39')
+    XML.SubElement(twrapper, 'jiraEnvironmentVariable').text = str(
+        data['environment-variable'])
+    XML.SubElement(twrapper, 'jiraProjectKey').text = str(
+        data['project-key'])
+    XML.SubElement(twrapper, 'jiraRelease').text = str(
+        data['release'])
+    XML.SubElement(twrapper, 'jiraFilter').text = str(
+        data.get('filter', 'status in (Resolved, Closed)'))
 
 class Wrappers(jenkins_jobs.modules.base.Base):
     sequence = 80
