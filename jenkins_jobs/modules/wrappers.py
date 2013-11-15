@@ -727,6 +727,7 @@ def jira_create_release_notes(parser, xml_parent, data):
 
       Defaults To:
         'status in (Released, Closed)'
+        
     Example::
 
       publishers:
