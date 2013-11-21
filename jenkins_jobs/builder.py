@@ -53,14 +53,14 @@ def format_item(item, paramdict, eval_params):
         evalstr = match.group(2).replace(r'\>', '>')
         try:
             evalresult = eval(evalstr, globals(), copy.copy(eval_params))
+            if match.group(0) == ret and (isinstance(evalresult, dict) or isinstance(evalresult, list)):
+                return evalresult 
+            ret = ret[:match.start(1)] + evalresult + ret[match.end(3):]
         except Exception as e:
             print traceback.format_exc()
-            desc = "Got exception trying to evaluate expression %s. Params are %s" % (
+            desc = "Got exception trying to evaluate expression: %s\nParams are %s" % (
                    evalstr, eval_params)
             raise JenkinsJobsException(desc)
-        if match.group(0) == ret and (isinstance(evalresult, dict) or isinstance(evalresult, list)):
-            return evalresult 
-        ret = ret[:match.start(1)] + evalresult + ret[match.end(3):]
     return ret
 
 def deep_format(obj, paramdict, eval_params):
