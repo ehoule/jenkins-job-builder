@@ -612,6 +612,11 @@ def conditional_step(parser, xml_parent, data):
                            either `workspace`, `artifact-directory`,
                            or `jenkins-home`. Default is `workspace`.
 
+    strings-match      Run if the two strings are the same
+    
+                         :condition-arg-1: First string
+                         :condition-arg-2: Second string
+                         :condition-ignore-case: Ignore the case of the strings when matching them (default: false)
     not                Logical not. Invert the result of the selected condition. Will run if the selected condition would not run.
     
                          :negated-condition: Condition to negate
@@ -682,6 +687,13 @@ def conditional_step(parser, xml_parent, data):
                 basedir_tag.set('class',
                                 'org.jenkins_ci.plugins.run_condition.common.'
                                 'BaseDirectory$JenkinsHome')
+        elif kind == "strings-match":
+            ctag.set('class',
+                     'org.jenkins_ci.plugins.run_condition.core.'
+                     'StringsMatchCondition')
+            XML.SubElement(ctag, "arg1").text = cdata['condition-arg-1']
+            XML.SubElement(ctag, "arg2").text = cdata['condition-arg-2']
+            XML.SubElement(ctag, "ignoreCase").text = cdata.get('condition-ignore-case', 'false')
         elif kind == "not":
             ctag.set('class',
                      'org.jenkins_ci.plugins.run_condition.logic.Not')
