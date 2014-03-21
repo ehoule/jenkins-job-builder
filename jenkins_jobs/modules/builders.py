@@ -39,6 +39,8 @@ Example::
 
 import xml.etree.ElementTree as XML
 import jenkins_jobs.modules.base
+from jenkins_jobs.modules import hudson_model
+from jenkins_jobs.errors import JenkinsJobsException
 import logging
 
 logger = logging.getLogger(__name__)
@@ -119,10 +121,10 @@ def copyartifact(parser, xml_parent, data):
             parameter-filters: PUBLISH=true
     """
     t = XML.SubElement(xml_parent, 'hudson.plugins.copyartifact.CopyArtifact')
-    #'project' element is used for copy artifact version 1.26+
+    # Warning: this only works with copy artifact version 1.26+,
+    # for copy artifact version 1.25- the 'projectName' element needs
+    # to be used instead of 'project'
     XML.SubElement(t, 'project').text = data["project"]
-    #'projectName' element is used for copy artifact version 1.25-
-    XML.SubElement(t, 'projectName').text = data["project"]
     XML.SubElement(t, 'filter').text = data.get("filter", "")
     XML.SubElement(t, 'target').text = data.get("target", "")
     flatten = data.get("flatten", False)
@@ -139,10 +141,10 @@ def copyartifact(parser, xml_parent, data):
                   'workspace-latest': 'WorkspaceSelector',
                   'build-param': 'ParameterizedBuildSelector'}
     if select not in selectdict:
-        raise Exception("which-build entered is not valid must be one of: " +
-                        "last-successful, specific-build, last-saved, " +
-                        "upstream-build, permalink, workspace-latest, " +
-                        " or build-param")
+        raise JenkinsJobsException("which-build entered is not valid must be "
+                                   "one of: last-successful, specific-build, "
+                                   "last-saved, upstream-build, permalink, "
+                                   "workspace-latest, or build-param")
     permalink = data.get('permalink', 'last')
     permalinkdict = {'last': 'lastBuild',
                      'last-stable': 'lastStableBuild',
@@ -151,12 +153,13 @@ def copyartifact(parser, xml_parent, data):
                      'last-unstable': 'lastUnstableBuild',
                      'last-unsuccessful': 'lastUnsuccessfulBuild'}
     if permalink not in permalinkdict:
-        raise Exception("permalink entered is not valid must be one of: " +
-                        "last, last-stable, last-successful, last-failed, " +
-                        "last-unstable, or last-unsuccessful")
+        raise JenkinsJobsException("permalink entered is not valid must be "
+                                   "one of: last, last-stable, "
+                                   "last-successful, last-failed, "
+                                   "last-unstable, or last-unsuccessful")
     selector = XML.SubElement(t, 'selector',
-                                 {'class': 'hudson.plugins.copyartifact.' +
-                                 selectdict[select]})
+                              {'class': 'hudson.plugins.copyartifact.' +
+                               selectdict[select]})
     if select == 'specific-build':
         XML.SubElement(selector, 'buildNumber').text = data['build-number']
     if select == 'last-successful':
@@ -269,15 +272,9 @@ def trigger_builds(parser, xml_parent, data):
     :arg bool block: whether to wait for the triggered jobs
       to finish or not (default false)
 
-    Example::
+    Example:
 
-      builders:
-        - trigger-builds:
-            - project: "build_started"
-              predefined-parameters:
-                FOO="bar"
-              block: true
-
+    .. literalinclude:: /../../tests/builders/fixtures/trigger-builds001.yaml
     """
     tbuilder = XML.SubElement(xml_parent,
                               'hudson.plugins.parameterizedtrigger.'
@@ -321,17 +318,26 @@ def trigger_builds(parser, xml_parent, data):
         if(block):
             block = XML.SubElement(tconfig, 'block')
             bsft = XML.SubElement(block, 'buildStepFailureThreshold')
-            XML.SubElement(bsft, 'name').text = 'FAILURE'
-            XML.SubElement(bsft, 'ordinal').text = '2'
-            XML.SubElement(bsft, 'color').text = 'RED'
+            XML.SubElement(bsft, 'name').text = \
+                hudson_model.FAILURE['name']
+            XML.SubElement(bsft, 'ordinal').text = \
+                hudson_model.FAILURE['ordinal']
+            XML.SubElement(bsft, 'color').text = \
+                hudson_model.FAILURE['color']
             ut = XML.SubElement(block, 'unstableThreshold')
-            XML.SubElement(ut, 'name').text = 'UNSTABLE'
-            XML.SubElement(ut, 'ordinal').text = '1'
-            XML.SubElement(ut, 'color').text = 'Yellow'
+            XML.SubElement(ut, 'name').text = \
+                hudson_model.UNSTABLE['name']
+            XML.SubElement(ut, 'ordinal').text = \
+                hudson_model.UNSTABLE['ordinal']
+            XML.SubElement(ut, 'color').text = \
+                hudson_model.UNSTABLE['color']
             ft = XML.SubElement(block, 'failureThreshold')
-            XML.SubElement(ft, 'name').text = 'FAILURE'
-            XML.SubElement(ft, 'ordinal').text = '2'
-            XML.SubElement(ft, 'color').text = 'RED'
+            XML.SubElement(ft, 'name').text = \
+                hudson_model.FAILURE['name']
+            XML.SubElement(ft, 'ordinal').text = \
+                hudson_model.FAILURE['ordinal']
+            XML.SubElement(ft, 'color').text = \
+                hudson_model.FAILURE['color']
     # If configs is empty, remove the entire tbuilder tree.
     if(len(configs) == 0):
         logger.debug("Pruning empty TriggerBuilder tree.")
@@ -565,8 +571,9 @@ def create_builders(parser, step):
 
 def conditional_step(parser, xml_parent, data):
     """yaml: conditional-step
-    Conditionaly execute some build steps.  Requires the Jenkins `Conditional
-    BuildStep Plugin`_.
+    Conditionally execute some build steps.  Requires the Jenkins `Conditional
+    BuildStep Plugin <https://wiki.jenkins-ci.org/display/ \
+    JENKINS/Conditional+BuildStep+Plugin>`_.
 
     Depending on the number of declared steps, a `Conditional step (single)`
     or a `Conditional steps (multiple)` is created in Jenkins.
@@ -595,8 +602,11 @@ def conditional_step(parser, xml_parent, data):
     current-status     Run the build step if the current build status is
                        within the configured range
 
-                         :condition-worst: Worst status
-                         :condition-best: Best status
+                         :condition-worst: Accepted values are SUCCESS,
+                           UNSTABLE, FAILURE, NOT_BUILD, ABORTED
+                         :condition-best: Accepted values are SUCCESS,
+                           UNSTABLE, FAILURE, NOT_BUILD, ABORTED
+
     shell              Run the step if the shell command succeed
 
                          :condition-command: Shell command to execute
@@ -622,20 +632,11 @@ def conditional_step(parser, xml_parent, data):
                          :negated-condition: Condition to negate
     ================== ====================================================
 
-    Example::
+    Example:
 
-      builders:
-        - conditional-step:
-            condition-kind: boolean-expression
-            condition-expression: "${ENV,var=IS_STABLE_BRANCH}"
-            on-evaluation-failure: mark-unstable
-            steps:
-                - shell: "echo Making extra checks"
-
-    .. _Conditional BuildStep Plugin: https://wiki.jenkins-ci.org/display/
-        JENKINS/Conditional+BuildStep+Plugin
+    .. literalinclude:: \
+    /../../tests/builders/fixtures/conditional-step-success-failure.yaml
     """
-
     def build_condition(cdata, parent_tag, condition_tag):
         kind = cdata['condition-kind']
         ctag = XML.SubElement(parent_tag, condition_tag)
@@ -655,9 +656,30 @@ def conditional_step(parser, xml_parent, data):
                      'org.jenkins_ci.plugins.run_condition.core.'
                      'StatusCondition')
             wr = XML.SubElement(ctag, 'worstResult')
-            XML.SubElement(wr, "name").text = cdata['condition-worst']
+            wr_name = cdata['condition-worst']
+            if wr_name not in hudson_model.THRESHOLDS:
+                raise JenkinsJobsException(
+                    "threshold must be one of %s" %
+                    ", ".join(hudson_model.THRESHOLDS.keys()))
+            wr_threshold = hudson_model.THRESHOLDS[wr_name]
+            XML.SubElement(wr, "name").text = wr_threshold['name']
+            XML.SubElement(wr, "ordinal").text = wr_threshold['ordinal']
+            XML.SubElement(wr, "color").text = wr_threshold['color']
+            XML.SubElement(wr, "completeBuild").text = \
+                str(wr_threshold['complete']).lower()
+
             br = XML.SubElement(ctag, 'bestResult')
-            XML.SubElement(br, "name").text = cdata['condition-best']
+            br_name = cdata['condition-best']
+            if not br_name in hudson_model.THRESHOLDS:
+                raise JenkinsJobsException(
+                    "threshold must be one of %s" %
+                    ", ".join(hudson_model.THRESHOLDS.keys()))
+            br_threshold = hudson_model.THRESHOLDS[br_name]
+            XML.SubElement(br, "name").text = br_threshold['name']
+            XML.SubElement(br, "ordinal").text = br_threshold['ordinal']
+            XML.SubElement(br, "color").text = br_threshold['color']
+            XML.SubElement(br, "completeBuild").text = \
+                str(wr_threshold['complete']).lower()
         elif kind == "shell":
             ctag.set('class',
                      'org.jenkins_ci.plugins.run_condition.contributed.'
@@ -742,19 +764,18 @@ def maven_target(parser, xml_parent, data):
     :arg str goals: Goals to execute
     :arg str properties: Properties for maven, can have multiples
     :arg str pom: Location of pom.xml (defaults to pom.xml)
+    :arg bool private-repository: Use private maven repository for this
+      job (defaults to false)
     :arg str maven-version: Installation of maven which should be used
       (optional)
+    :arg str java-opts: java options for maven, can have multiples,
+        must be in quotes (optional)
+    :arg str settings: Path to use as user settings.xml (optional)
+    :arg str global-settings: Path to use as global settings.xml (optional)
 
-    Example::
+    Example:
 
-      builders:
-        - maven-target:
-            maven-version: Maven3
-            pom: parent/pom.xml
-            goals: clean
-            properties:
-              - foo=bar
-              - bar=foo
+    .. literalinclude:: /../../tests/builders/fixtures/maven-target-doc.yaml
     """
     maven = XML.SubElement(xml_parent, 'hudson.tasks.Maven')
     XML.SubElement(maven, 'targets').text = data['goals']
@@ -764,11 +785,30 @@ def maven_target(parser, xml_parent, data):
         XML.SubElement(maven, 'mavenName').text = str(data['maven-version'])
     if 'pom' in data:
         XML.SubElement(maven, 'pom').text = str(data['pom'])
-    XML.SubElement(maven, 'usePrivateRepository').text = 'false'
-    XML.SubElement(maven, 'settings', {
-                   'class': 'jenkins.mvn.DefaultSettingsProvider'})
-    XML.SubElement(maven, 'globalSettings', {
-                   'class': 'jenkins.mvn.DefaultGlobalSettingsProvider'})
+    use_private = str(data.get('private-repository', False)).lower()
+    XML.SubElement(maven, 'usePrivateRepository').text = use_private
+    if 'java-opts' in data:
+        javaoptions = ' '.join(data.get('java-opts', []))
+        XML.SubElement(maven, 'jvmOptions').text = javaoptions
+    if 'settings' in data:
+        settings = XML.SubElement(maven, 'settings',
+                                  {'class':
+                                   'jenkins.mvn.FilePathSettingsProvider'})
+        XML.SubElement(settings, 'path').text = data.get('settings')
+    else:
+        XML.SubElement(maven, 'settings',
+                       {'class':
+                        'jenkins.mvn.DefaultSettingsProvider'})
+    if 'global-settings' in data:
+        provider = 'jenkins.mvn.FilePathGlobalSettingsProvider'
+        global_settings = XML.SubElement(maven, 'globalSettings',
+                                         {'class': provider})
+        XML.SubElement(global_settings, 'path').text = data.get(
+            'global-settings')
+    else:
+        XML.SubElement(maven, 'globalSettings',
+                       {'class':
+                        'jenkins.mvn.DefaultGlobalSettingsProvider'})
 
 
 def multijob(parser, xml_parent, data):
@@ -1027,3 +1067,126 @@ class Builders(jenkins_jobs.modules.base.Base):
         project_type = data.get('project-type', 'freestyle')
         if project_type in ('freestyle', 'matrix') and 'builders' not in data:
             XML.SubElement(xml_parent, 'builders')
+
+
+def shining_panda(parser, xml_parent, data):
+    """yaml: shining-panda
+    Execute a command inside various python environments. Requires the Jenkins
+    `ShiningPanda plugin
+    <https://wiki.jenkins-ci.org/display/JENKINS/ShiningPanda+Plugin>`_.
+
+    :arg str build-environment: Building environment to set up (Required).
+
+        :build-environment values:
+            * **python**: Use a python installation configured in Jenkins.
+            * **custom**: Use a manually installed python.
+            * **virtualenv**: Create a virtualenv
+
+    For the **python** environment
+
+    :arg str python-version: Name of the python installation to use.
+        Must match one of the configured installations on server \
+        configuration
+        (default: System-CPython-2.7)
+
+    For the **custom** environment:
+
+    :arg str home: path to the home folder of the custom installation \
+        (Required)
+
+    For the **virtualenv** environment:
+
+    :arg str python-version: Name of the python installation to use.
+        Must match one of the configured installations on server \
+        configuration
+        (default: System-CPython-2.7)
+    :arg str name: Name of this virtualenv. Two virtualenv builders with \
+        the same name will use the same virtualenv installation (optional)
+    :arg bool clear: If true, delete and recreate virtualenv on each build.
+        (default: false)
+    :arg bool use-distribute: if true use distribute, if false use \
+        setuptools. (default: true)
+    :arg bool system-site-packages: if true, give access to the global
+        site-packages directory to the virtualenv. (default: false)
+
+    Common to all environments:
+
+    :arg str nature: Nature of the command field. (default: shell)
+
+        :nature values:
+            * **shell**: execute the Command contents with default shell
+            * **xshell**: like **shell** but performs platform conversion \
+                first
+            * **python**: execute the Command contents with the Python \
+                executable
+
+    :arg str command: The command to execute
+    :arg bool ignore-exit-code: mark the build as failure if any of the
+        commands exits with a non-zero exit code. (default: false)
+
+    Examples:
+
+    .. literalinclude:: \
+        /../../tests/builders/fixtures/shining-panda-pythonenv.yaml
+
+    .. literalinclude:: \
+        /../../tests/builders/fixtures/shining-panda-customenv.yaml
+
+    .. literalinclude:: \
+        /../../tests/builders/fixtures/shining-panda-virtualenv.yaml
+    """
+
+    pluginelementpart = 'jenkins.plugins.shiningpanda.builders.'
+    buildenvdict = {'custom': 'CustomPythonBuilder',
+                    'virtualenv': 'VirtualenvBuilder',
+                    'python': 'PythonBuilder'}
+    envs = (buildenvdict.keys())
+
+    try:
+        buildenv = data['build-environment']
+    except KeyError:
+        raise JenkinsJobsException("A build-environment is required")
+
+    if buildenv not in envs:
+        errorstring = ("build-environment '%s' is invalid. Must be one of %s."
+                       % (buildenv, ', '.join("'{0}'".format(env)
+                                              for env in envs)))
+        raise JenkinsJobsException(errorstring)
+
+    t = XML.SubElement(xml_parent, '%s%s' %
+                       (pluginelementpart, buildenvdict[buildenv]))
+
+    if buildenv in ('python', 'virtualenv'):
+        XML.SubElement(t, 'pythonName').text = data.get("python-version",
+                                                        "System-CPython-2.7")
+
+    if buildenv in ('custom'):
+        try:
+            homevalue = data["home"]
+        except KeyError:
+            raise JenkinsJobsException("'home' argument is required for the"
+                                       " 'custom' environment")
+        XML.SubElement(t, 'home').text = homevalue
+
+    if buildenv in ('virtualenv'):
+        XML.SubElement(t, 'home').text = data.get("name", "")
+        clear = data.get("clear", False)
+        XML.SubElement(t, 'clear').text = str(clear).lower()
+        use_distribute = data.get('use-distribute', False)
+        XML.SubElement(t, 'useDistribute').text = str(use_distribute).lower()
+        system_site_packages = data.get('system-site-packages', False)
+        XML.SubElement(t, 'systemSitePackages').text = str(
+            system_site_packages).lower()
+
+    # Common arguments
+    nature = data.get('nature', 'shell')
+    naturetuple = ('shell', 'xshell', 'python')
+    if nature not in naturetuple:
+        errorstring = ("nature '%s' is not valid: must be one of %s."
+                       % (nature, ', '.join("'{0}'".format(naturevalue)
+                                            for naturevalue in naturetuple)))
+        raise JenkinsJobsException(errorstring)
+    XML.SubElement(t, 'nature').text = nature
+    XML.SubElement(t, 'command').text = data.get("command", "")
+    ignore_exit_code = data.get('ignore-exit-code', False)
+    XML.SubElement(t, 'ignoreExitCode').text = str(ignore_exit_code).lower()

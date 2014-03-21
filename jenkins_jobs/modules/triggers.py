@@ -140,6 +140,9 @@ def gerrit(parser, xml_parent, data):
     :arg int gerrit-build-successful-verified-value: Successful ''Verified''
         value
     :arg int gerrit-build-failed-verified-value: Failed ''Verified'' value
+    :arg int gerrit-build-successful-codereview-value: Successful
+        ''CodeReview'' value
+    :arg int gerrit-build-failed-codereview-value: Failed ''CodeReview'' value
     :arg str failure-message: Message to leave on failure (default '')
     :arg str successful-message: Message to leave on success (default '')
     :arg str unstable-message: Message to leave when unstable (default '')
@@ -186,7 +189,7 @@ def gerrit(parser, xml_parent, data):
 
     You may select one or more gerrit events upon which to trigger.
     You must also supply at least one project and branch, optionally
-    more.  If you select the comment-added trigger, you should alse
+    more.  If you select the comment-added trigger, you should also
     indicate which approval category and value you want to trigger the
     job.
 
@@ -267,10 +270,18 @@ def gerrit(parser, xml_parent, data):
     build_gerrit_triggers(gtrig, data)
     override = str(data.get('override-votes', False)).lower()
     if override == 'true':
-        XML.SubElement(gtrig, 'gerritBuildSuccessfulVerifiedValue').text = \
-            str(data['gerrit-build-successful-verified-value'])
-        XML.SubElement(gtrig, 'gerritBuildFailedVerifiedValue').text = \
-            str(data['gerrit-build-failed-verified-value'])
+        for yamlkey, xmlkey in [('gerrit-build-successful-verified-value',
+                                 'gerritBuildSuccessfulVerifiedValue'),
+                                ('gerrit-build-failed-verified-value',
+                                 'gerritBuildFailedVerifiedValue'),
+                                ('gerrit-build-successful-codereview-value',
+                                 'gerritBuildSuccessfulCodereviewValue'),
+                                ('gerrit-build-failed-codereview-value',
+                                 'gerritBuildFaiedCodeReviewValue')]:
+            if data.get(yamlkey) is not None:
+                # str(int(x)) makes input values like '+1' work
+                XML.SubElement(gtrig, xmlkey).text = str(
+                    int(data.get(yamlkey)))
     XML.SubElement(gtrig, 'buildStartMessage').text = str(
         data.get('start-message', ''))
     XML.SubElement(gtrig, 'buildFailureMessage').text = \
@@ -315,7 +326,7 @@ def timed(parser, xml_parent, data):
 
 def github(parser, xml_parent, data):
     """yaml: github
-    Trigger a job when github repository is pushed to
+    Trigger a job when github repository is pushed to.
     Requires the Jenkins `GitHub Plugin.
     <https://wiki.jenkins-ci.org/display/JENKINS/GitHub+Plugin>`_
 
@@ -331,30 +342,28 @@ def github(parser, xml_parent, data):
 
 def github_pull_request(parser, xml_parent, data):
     """yaml: github-pull-request
-    Build pull requests in github and report results
+    Build pull requests in github and report results.
     Requires the Jenkins `GitHub Pull Request Builder Plugin.
     <https://wiki.jenkins-ci.org/display/JENKINS/
     GitHub+pull+request+builder+plugin>`_
 
     :arg list admin-list: the users with admin rights (optional)
-    :arg string cron: cron syntax of when to run (optional)
     :arg list white-list: users whose pull requests build (optional)
     :arg list org-list: orgs whose users should be white listed (optional)
+    :arg string cron: cron syntax of when to run (optional)
+    :arg string trigger-phrase: when filled, commenting this phrase
+        in the pull request will trigger a build (optional)
+    :arg bool only-trigger-phrase: only commenting the trigger phrase
+        in the pull request will trigger a build (default false)
+    :arg bool github-hooks: use github hook (default false)
+    :arg bool permit-all: build every pull request automatically
+        without asking (default false)
+    :arg bool auto-close-on-fail: close failed pull request automatically
+        (default false)
 
-    Example::
+    Example:
 
-      triggers:
-        - github-pull-request:
-            admin-list:
-              - user1
-              - user2
-            cron: * * * * *
-            white-list:
-              - user3
-              - user4
-            org-list:
-              - org1
-              - org2
+    .. literalinclude:: /../../tests/triggers/fixtures/github-pull-request.yaml
     """
     ghprb = XML.SubElement(xml_parent, 'org.jenkinsci.plugins.ghprb.'
                            'GhprbTrigger')
@@ -366,12 +375,22 @@ def github_pull_request(parser, xml_parent, data):
     org_string = "\n".join(data.get('org-list', []))
     XML.SubElement(ghprb, 'orgslist').text = org_string
     XML.SubElement(ghprb, 'cron').text = data.get('cron', '')
+    XML.SubElement(ghprb, 'triggerPhrase').text = \
+        data.get('trigger-phrase', '')
+    XML.SubElement(ghprb, 'onlyTriggerPhrase').text = str(
+        data.get('only-trigger-phrase', False)).lower()
+    XML.SubElement(ghprb, 'useGitHubHooks').text = str(
+        data.get('github-hooks', False)).lower()
+    XML.SubElement(ghprb, 'permitAll').text = str(
+        data.get('permit-all', False)).lower()
+    XML.SubElement(ghprb, 'autoCloseFailedPullRequests').text = str(
+        data.get('auto-close-on-fail', False)).lower()
 
 
 def build_result(parser, xml_parent, data):
     """yaml: build-result
     Configure jobB to monitor jobA build result. A build is scheduled if there
-    is a new build result matches your criteria (unstable, failure, ...)
+    is a new build result that matches your criteria (unstable, failure, ...).
     Requires the Jenkins `BuildResultTrigger Plugin.
     <https://wiki.jenkins-ci.org/display/JENKINS/BuildResultTrigger+Plugin>`_
 
@@ -433,6 +452,43 @@ def build_result(parser, xml_parent, data):
                                            'plugins.buildresulttrigger.model.'
                                            'CheckedResult')
             XML.SubElement(model_checked, 'checked').text = result_dict[result]
+
+
+def script(parser, xml_parent, data):
+    """yaml: script
+    Triggers the job using shell or batch script.
+    Requires the Jenkins `ScriptTrigger Plugin.
+    <https://wiki.jenkins-ci.org/display/JENKINS/ScriptTrigger+Plugin>`_
+
+    :arg str label: Restrict where the polling should run. (default '')
+    :arg str script: A shell or batch script. (default '')
+    :arg str cron: cron syntax of when to run (default '')
+    :arg bool enable-concurrent:  Enables triggering concurrent builds.
+                                  (default false)
+    :arg int exit-code:  If the exit code of the script execution returns this
+                         expected exit code, a build is scheduled. (default 0)
+
+    Example:
+
+    .. literalinclude:: /../../tests/triggers/fixtures/script.yaml
+    """
+    data = data if data else {}
+    st = XML.SubElement(
+        xml_parent,
+        'org.jenkinsci.plugins.scripttrigger.ScriptTrigger'
+    )
+    label = data.get('label')
+
+    XML.SubElement(st, 'script').text = str(data.get('script', ''))
+    XML.SubElement(st, 'scriptFilePath').text = str(
+        data.get('script-file-path', ''))
+    XML.SubElement(st, 'spec').text = str(data.get('cron', ''))
+    XML.SubElement(st, 'labelRestriction').text = str(bool(label)).lower()
+    if label:
+        XML.SubElement(st, 'triggerLabel').text = label
+    XML.SubElement(st, 'enableConcurrentBuild').text = str(
+        data.get('enable-concurrent', False)).lower()
+    XML.SubElement(st, 'exitCode').text = str(data.get('exit-code', 0))
 
 
 class Triggers(jenkins_jobs.modules.base.Base):

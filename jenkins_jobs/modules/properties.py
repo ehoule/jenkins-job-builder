@@ -34,6 +34,32 @@ Example::
 
 import xml.etree.ElementTree as XML
 import jenkins_jobs.modules.base
+from jenkins_jobs.errors import JenkinsJobsException
+
+
+def builds_chain_fingerprinter(parser, xml_parent, data):
+    """yaml: builds-chain-fingerprinter
+    Builds chain fingerprinter.
+    Requires the Jenkins `Builds chain fingerprinter Plugin.
+    <https://wiki.jenkins-ci.org/display/JENKINS/Builds+chain+fingerprinter>`_
+
+    :arg bool per-builds-chain: enable builds hierarchy fingerprinting
+        (default False)
+    :arg bool per-job-chain: enable jobs hierarchy fingerprinting
+        (default False)
+
+    Example:
+
+    .. literalinclude:: /../../tests/properties/fixtures/fingerprinter.yaml
+    """
+    fingerprinter = XML.SubElement(xml_parent,
+                                   'org.jenkinsci.plugins.'
+                                   'buildschainfingerprinter.'
+                                   'AutomaticFingerprintJobProperty')
+    XML.SubElement(fingerprinter, 'isPerBuildsChainEnabled').text = str(
+        data.get('per-builds-chain', False)).lower()
+    XML.SubElement(fingerprinter, 'isPerJobsChainEnabled').text = str(
+        data.get('per-job-chain', False)).lower()
 
 
 def ownership(parser, xml_parent, data):
@@ -117,6 +143,26 @@ def github(parser, xml_parent, data):
                             'GithubProjectProperty')
     github_url = XML.SubElement(github, 'projectUrl')
     github_url.text = data['url']
+
+
+def least_load(parser, xml_parent, data):
+    """yaml: least-load
+    Enables the Least Load Plugin.
+    Requires the Jenkins `Least Load Plugin.
+    <https://wiki.jenkins-ci.org/display/JENKINS/Least+Load+Plugin>`_
+
+    :arg bool disabled: whether or not leastload is disabled (default True)
+
+    Example::
+
+    .. literalinclude:: /../../tests/properties/fixtures/least_load002.yaml
+    """
+    least = XML.SubElement(xml_parent,
+                           'org.bstick12.jenkinsci.plugins.leastload.'
+                           'LeastLoadDisabledProperty')
+
+    XML.SubElement(least, 'leastLoadDisabled').text = str(
+        data.get('disabled', True)).lower()
 
 
 def throttle(parser, xml_parent, data):
@@ -351,8 +397,9 @@ def extended_choice(parser, xml_parent, data):
                   'radio': 'PT_RADIO',
                   'checkbox': 'PT_CHECKBOX'}
     if choice not in choicedict:
-        raise Exception("Type entered is not valid, must be one of: " +
-                        "single-select, multi-select, radio, or checkbox")
+        raise JenkinsJobsException("Type entered is not valid, must be one "
+                                   "of: single-select, multi-select, radio, "
+                                   "or checkbox")
     XML.SubElement(extended, 'type').text = choicedict[choice]
     XML.SubElement(extended, 'value').text = data.get('value', '')
     XML.SubElement(extended, 'propertyFile').text = data.get('property-file',
@@ -411,21 +458,121 @@ def build_blocker(parser, xml_parent, data):
               use-build-blocker: true
               blocking-jobs:
                 - ".*-deploy"
-                - "^maintainance.*"
+                - "^maintenance.*"
     """
     blocker = XML.SubElement(xml_parent,
                              'hudson.plugins.'
                              'buildblocker.BuildBlockerProperty')
     if data is None or 'blocking-jobs' not in data:
-        raise Exception('blocking-jobs field is missing')
+        raise JenkinsJobsException('blocking-jobs field is missing')
     elif data.get('blocking-jobs', None) is None:
-        raise Exception('blocking-jobs list must not be empty')
+        raise JenkinsJobsException('blocking-jobs list must not be empty')
     XML.SubElement(blocker, 'useBuildBlocker').text = str(
         data.get('use-build-blocker', True)).lower()
     jobs = ''
     for value in data['blocking-jobs']:
         jobs = jobs + value + '\n'
     XML.SubElement(blocker, 'blockingJobs').text = jobs
+
+
+def batch_tasks(parser, xml_parent, data):
+    """yaml: batch-tasks
+    Batch tasks can be tasks for events like releases, integration, archiving,
+    etc. In this way, anyone in the project team can execute them in a way that
+    leaves a record.
+
+    A batch task consists of a shell script and a name. When you execute
+    a build, the shell script gets run on the workspace, just like a build.
+    Batch tasks and builds "lock" the workspace, so when one of those
+    activities is in progress, all the others will block in the queue.
+
+    Requires the Jenkins `Batch Task Plugin.
+    <https://wiki.jenkins-ci.org/display/JENKINS/Batch+Task+Plugin>`_
+
+    :arg list batch-tasks: Batch tasks.
+
+        :Task: * **name** (`str`) Task name.
+               * **script** (`str`) Task script.
+
+    Example:
+
+    .. literalinclude:: /../../tests/properties/fixtures/batch-task.yaml
+
+    """
+    pdef = XML.SubElement(xml_parent,
+                          'hudson.plugins.batch__task.BatchTaskProperty')
+    tasks = XML.SubElement(pdef, 'tasks')
+    for task in data:
+        batch_task = XML.SubElement(tasks,
+                                    'hudson.plugins.batch__task.BatchTask')
+        XML.SubElement(batch_task, 'name').text = task['name']
+        XML.SubElement(batch_task, 'script').text = task['script']
+
+
+def heavy_job(parser, xml_parent, data):
+    """yaml: heavy-job
+    This plugin allows you to define "weight" on each job,
+    and making each job consume that many executors
+
+    Requires the Jenkins `Heavy Job Plugin.
+    <https://wiki.jenkins-ci.org/display/JENKINS/Heavy+Job+Plugin>`_
+
+    :arg int weight: Specify the total number of executors
+        that this job should occupy (defaults to 1)
+
+
+    Example:
+
+    .. literalinclude:: /../../tests/properties/fixtures/heavy-job.yaml
+
+    """
+    heavyjob = XML.SubElement(xml_parent,
+                              'hudson.plugins.'
+                              'heavy__job.HeavyJobProperty')
+    XML.SubElement(heavyjob, 'weight').text = str(
+        data.get('weight', 1))
+
+
+def delivery_pipeline(parser, xml_parent, data):
+    """yaml: delivery-pipeline
+    Requires the Jenkins `Delivery Pipeline Plugin.
+    <https://wiki.jenkins-ci.org/display/JENKINS/Delivery+Pipeline+Plugin>`_
+
+    :arg str stage: Name of the stage for this job (default: '')
+    :arg str task: Name of the task for this job (default: '')
+
+    Example:
+
+    .. literalinclude:: \
+            /../../tests/properties/fixtures/delivery-pipeline1.yaml
+
+    """
+    pipeline = XML.SubElement(xml_parent,
+                              'se.diabol.jenkins.pipeline.'
+                              'PipelineProperty')
+    XML.SubElement(pipeline, 'stageName').text = data.get('stage', '')
+    XML.SubElement(pipeline, 'taskName').text = data.get('task', '')
+
+
+def zeromq_event(parser, xml_parent, data):
+    """yaml: zeromq-event
+    This is a Jenkins plugin that will publish Jenkins Job run events
+    (start, complete, finish) to a ZMQ PUB socket.
+
+    Requires the Jenkins `ZMQ Event Publisher.
+    <https://git.openstack.org/cgit/openstack-infra/zmq-event-publisher>`_
+
+    Example:
+
+    .. literalinclude:: \
+            /../../tests/properties/fixtures/zeromq-event.yaml
+
+    """
+
+    zmq_event = XML.SubElement(xml_parent,
+                               'org.jenkinsci.plugins.'
+                               'ZMQEventPublisher.HudsonNotificationProperty')
+    XML.SubElement(zmq_event, 'enabled').text = 'true'
 
 
 class Properties(jenkins_jobs.modules.base.Base):

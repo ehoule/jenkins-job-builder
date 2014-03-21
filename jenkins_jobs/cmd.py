@@ -40,7 +40,7 @@ def main():
                                dest='delete_old', default=False,)
     parser_test = subparser.add_parser('test')
     parser_test.add_argument('path', help='Path to YAML file or directory')
-    parser_test.add_argument('-o', dest='output_dir',
+    parser_test.add_argument('-o', dest='output_dir', required=True,
                              help='Path to output XML')
     parser_test.add_argument('name', help='name(s) of job(s)', nargs='*')
     parser_delete = subparser.add_parser('delete')
@@ -79,24 +79,49 @@ def main():
         if os.path.isfile(localconf):
             conf = localconf
 
+    config = ConfigParser.ConfigParser()
     if os.path.isfile(conf):
         logger.debug("Reading config from {0}".format(conf))
         conffp = open(conf, 'r')
-        config = ConfigParser.ConfigParser()
         config.readfp(conffp)
     elif options.command == 'test':
+        ## to avoid the 'no section' and 'no option' errors when testing
+        config.add_section("jenkins")
+        config.set("jenkins", "url", "http://localhost:8080")
+        config.set("jenkins", "user", None)
+        config.set("jenkins", "password", None)
+        config.set("jenkins", "ignore_cache", False)
         logger.debug("Not reading config for test output generation")
-        config = {}
     else:
         raise jenkins_jobs.errors.JenkinsJobsException(
             "A valid configuration file is required when not run as a test")
 
     logger.debug("Config: {0}".format(config))
+
+    # check the ignore_cache setting: first from command line,
+    # if not present check from ini file
+    ignore_cache = False
+    if options.ignore_cache:
+        ignore_cache = options.ignore_cache
+    elif config.has_option('jenkins', 'ignore_cache'):
+        ignore_cache = config.get('jenkins', 'ignore_cache')
+
+    # workaround for python 2.6 interpolation error
+    # https://bugs.launchpad.net/openstack-ci/+bug/1259631
+    try:
+        user = config.get('jenkins', 'user')
+    except (TypeError, ConfigParser.NoOptionError):
+        user = None
+    try:
+        password = config.get('jenkins', 'password')
+    except (TypeError, ConfigParser.NoOptionError):
+        password = None
+
     builder = jenkins_jobs.builder.Builder(config.get('jenkins', 'url'),
-                                           config.get('jenkins', 'user'),
-                                           config.get('jenkins', 'password'),
+                                           user,
+                                           password,
                                            config,
-                                           ignore_cache=options.ignore_cache,
+                                           ignore_cache=ignore_cache,
                                            flush_cache=options.flush_cache)
 
     if options.command == 'delete':

@@ -16,6 +16,7 @@
 # Manage jobs in Jenkins server
 
 import os
+import sys
 import hashlib
 import yaml
 import json
@@ -62,6 +63,41 @@ def format_item(item, paramdict, eval_params):
                    evalstr, eval_params)
             raise JenkinsJobsException(desc)
     return ret
+
+# Python <= 2.7.3's minidom toprettyxml produces broken output by adding
+# extraneous whitespace around data. This patches the broken implementation
+# with one taken from Python > 2.7.3.
+def writexml(self, writer, indent="", addindent="", newl=""):
+    # indent = current indentation
+    # addindent = indentation to add to higher levels
+    # newl = newline string
+    writer.write(indent + "<" + self.tagName)
+
+    attrs = self._get_attributes()
+    a_names = attrs.keys()
+    a_names.sort()
+
+    for a_name in a_names:
+        writer.write(" %s=\"" % a_name)
+        minidom._write_data(writer, attrs[a_name].value)
+        writer.write("\"")
+    if self.childNodes:
+        writer.write(">")
+        if (len(self.childNodes) == 1 and
+                self.childNodes[0].nodeType == minidom.Node.TEXT_NODE):
+            self.childNodes[0].writexml(writer, '', '', '')
+        else:
+            writer.write(newl)
+            for node in self.childNodes:
+                node.writexml(writer, indent + addindent, addindent, newl)
+            writer.write(indent)
+        writer.write("</%s>%s" % (self.tagName, newl))
+    else:
+        writer.write("/>%s" % (newl))
+
+if sys.version_info[:3] <= (2, 7, 3):
+    minidom.Element.writexml = writexml
+
 
 def deep_format(obj, paramdict, eval_params):
     """Apply the paramdict via str.format() to all string objects found within
@@ -207,6 +243,10 @@ class YamlParser(object):
     def parse(self, fn):
         data = yaml.load(open(fn))
         if data:
+            if not isinstance(data, list):
+                raise JenkinsJobsException(
+                    "The topmost collection in file '{fname}' must be a list,"
+                    " not a {cls}".format(fname=fn, cls=type(data)))
             for item in data:
                 cls, dfn = item.items()[0]
                 group = self.data.get(cls, {})
@@ -258,7 +298,7 @@ class YamlParser(object):
 
         for job in self.data.get('job', {}).values():
             if jobs_filter and not matches(job['name'], jobs_filter):
-                logger.debug("Ignoring job {}".format(job['name']))
+                logger.debug("Ignoring job {0}".format(job['name']))
                 continue
             logger.debug("XMLifying job '{0}'".format(job['name']))
             job = self.applyDefaults(job)
@@ -270,6 +310,8 @@ class YamlParser(object):
                 if isinstance(jobspec, dict):
                     # Singleton dict containing dict of job-specific params
                     jobname, jobparams = jobspec.items()[0]
+                    if not isinstance(jobparams, dict):
+                        jobparams = {}
                 else:
                     jobname = jobspec
                     jobparams = {}
@@ -284,6 +326,8 @@ class YamlParser(object):
                         if isinstance(group_jobspec, dict):
                             group_jobname, group_jobparams = \
                                 group_jobspec.items()[0]
+                            if not isinstance(group_jobparams, dict):
+                                group_jobparams = {}
                         else:
                             group_jobname = group_jobspec
                             group_jobparams = {}
@@ -309,6 +353,10 @@ class YamlParser(object):
                     d.update(project)
                     d.update(jobparams)
                     self.getXMLForTemplateJob(d, template, jobs_filter)
+                else:
+                    raise JenkinsJobsException("Failed to find suitable "
+                                               "template named '{0}'"
+                                               .format(jobname))
 
     def getXMLForTemplateJob(self, project, template, jobs_filter=None):
         dimensions = []
@@ -359,8 +407,8 @@ class YamlParser(object):
 
     def getXMLForJob(self, data):
         kind = data.get('project-type', 'freestyle')
-        data["description"] = data.get("description", "") + \
-            self.get_managed_string()
+        data["description"] = (data.get("description", "") +
+                               self.get_managed_string()).lstrip()
         for ep in pkg_resources.iter_entry_points(
                 group='jenkins_jobs.projects', name=kind):
             Mod = ep.load()
@@ -383,6 +431,8 @@ class YamlParser(object):
 
 
 class ModuleRegistry(object):
+    entry_points_cache = {}
+
     def __init__(self, config):
         self.modules = []
         self.modules_by_component_type = {}
@@ -445,10 +495,23 @@ class ModuleRegistry(object):
             component_data = {}
 
         # Look for a component function defined in an entry point
-        for ep in pkg_resources.iter_entry_points(
-                group='jenkins_jobs.{0}'.format(component_list_type),
-                name=name):
-            func = ep.load()
+        cache_key = '%s:%s' % (component_list_type, name)
+        eps = ModuleRegistry.entry_points_cache.get(cache_key)
+        if eps is None:
+            eps = list(pkg_resources.iter_entry_points(
+                       group='jenkins_jobs.{0}'.format(component_list_type),
+                       name=name))
+            if len(eps) > 1:
+                raise JenkinsJobsException(
+                    "Duplicate entry point found for component type: '{0}',"
+                    "name: '{1}'".format(component_type, name))
+            elif len(eps) == 1:
+                ModuleRegistry.entry_points_cache[cache_key] = eps
+                logger.debug("Cached entry point %s = %s", cache_key,
+                             ModuleRegistry.entry_points_cache[cache_key])
+
+        if len(eps) == 1:
+            func = eps[0].load()
             func(parser, xml_parent, component_data)
         else:
             # Otherwise, see if it's defined as a macro
@@ -463,6 +526,10 @@ class ModuleRegistry(object):
                     # the arguments are interpolated into the real defn.
                     self.dispatch(component_type,
                                   parser, xml_parent, b, component_data)
+            else:
+                raise JenkinsJobsException("Unknown entry point or macro '{0}'"
+                                           " for component type: '{1}'.".
+                                           format(name, component_type))
 
 
 class XmlJob(object):
@@ -473,14 +540,9 @@ class XmlJob(object):
     def md5(self):
         return hashlib.md5(self.output()).hexdigest()
 
-    # Pretty printing ideas from
-    # http://stackoverflow.com/questions/749796/pretty-printing-xml-in-python
-    pretty_text_re = re.compile('>\n\s+([^<>\s].*?)\n\s+</', re.DOTALL)
-
     def output(self):
         out = minidom.parseString(XML.tostring(self.xml))
-        out = out.toprettyxml(indent='  ')
-        return self.pretty_text_re.sub('>\g<1></', out)
+        return out.toprettyxml(indent='  ', encoding='utf-8')
 
 
 class CacheStorage(object):

@@ -36,6 +36,35 @@ import jenkins_jobs.modules.base
 from jenkins_jobs.modules.builders import create_builders
 
 
+def ci_skip(parser, xml_parent, data):
+    """yaml: ci-skip
+    Skip making a build for certain push.
+    Just add [ci skip] into your commit's message to let Jenkins know,
+    that you do not want to perform build for the next push.
+    Requires the Jenkins `Ci Skip Plugin.
+    <https://wiki.jenkins-ci.org/display/JENKINS/Ci+Skip+Plugin>`_
+
+    Example:
+
+    .. literalinclude:: /../../tests/wrappers/fixtures/ci-skip001.yaml
+    """
+    rpobj = XML.SubElement(xml_parent, 'ruby-proxy-object')
+    robj = XML.SubElement(rpobj, 'ruby-object', attrib={
+        'pluginid': 'ci-skip',
+        'ruby-class': 'Jenkins::Tasks::BuildWrapperProxy'
+    })
+    pluginid = XML.SubElement(robj, 'pluginid', {
+        'pluginid': 'ci-skip', 'ruby-class': 'String'
+    })
+    pluginid.text = 'ci-skip'
+    obj = XML.SubElement(robj, 'object', {
+        'ruby-class': 'CiSkipWrapper', 'pluginid': 'ci-skip'
+    })
+    XML.SubElement(obj, 'ci__skip', {
+        'pluginid': 'ci-skip', 'ruby-class': 'NilClass'
+    })
+
+
 def timeout(parser, xml_parent, data):
     """yaml: timeout
     Abort the build if it runs too long.
@@ -237,6 +266,92 @@ def rvm_env(parser, xml_parent, data):
                     'ruby-class': 'String'}).text = "rvm"
 
 
+def rbenv(parser, xml_parent, data):
+    """yaml: rbenv
+    Set the rbenv implementation.
+    Requires the Jenkins `rbenv plugin.
+    <https://wiki.jenkins-ci.org/display/JENKINS/rbenv+plugin>`_
+
+    All parameters are optional.
+
+    :arg str ruby-version: Version of Ruby to use  (default: 1.9.3-p484)
+    :arg bool ignore-local-version: If true, ignore local Ruby
+        version (defined in the ".ruby-version" file in workspace) even if it
+        has been defined  (default: false)
+    :arg str preinstall-gem-list: List of gems to install
+        (default: 'bundler,rake')
+    :arg str rbenv-root: RBENV_ROOT  (default: $HOME/.rbenv)
+    :arg str rbenv-repo: Which repo to clone rbenv from
+        (default: https://github.com/sstephenson/rbenv.git)
+    :arg str rbenv-branch: Which branch to clone rbenv from  (default: master)
+    :arg str ruby-build-repo: Which repo to clone ruby-build from
+        (default: https://github.com/sstephenson/ruby-build.git)
+    :arg str ruby-build-branch: Which branch to clone ruby-build from
+        (default: master)
+
+    Example:
+
+    .. literalinclude:: /../../tests/wrappers/fixtures/rbenv003.yaml
+    """
+
+    mapping = [
+        # option, xml name, default value (text), attributes (hard coded)
+        ("preinstall-gem-list", 'gem__list', 'bundler,rake'),
+        ("rbenv-root", 'rbenv__root', '$HOME/.rbenv'),
+        ("rbenv-repo", 'rbenv__repository',
+            'https://github.com/sstephenson/rbenv.git'),
+        ("rbenv-branch", 'rbenv__revision', 'master'),
+        ("ruby-build-repo", 'ruby__build__repository',
+            'https://github.com/sstephenson/ruby-build.git'),
+        ("ruby-build-branch", 'ruby__build__revision', 'master'),
+        ("ruby-version", 'version', '1.9.3-p484'),
+    ]
+
+    rpo = XML.SubElement(xml_parent,
+                         'ruby-proxy-object')
+
+    ro_class = "Jenkins::Tasks::BuildWrapperProxy"
+    ro = XML.SubElement(rpo,
+                        'ruby-object',
+                        {'ruby-class': ro_class,
+                         'pluginid': 'rbenv'})
+
+    XML.SubElement(ro,
+                   'pluginid',
+                   {'pluginid': "rbenv",
+                    'ruby-class': "String"}).text = "rbenv"
+
+    o = XML.SubElement(ro,
+                       'object',
+                       {'ruby-class': 'RbenvWrapper',
+                        'pluginid': 'rbenv'})
+
+    for elem in mapping:
+        (optname, xmlname, val) = elem[:3]
+        xe = XML.SubElement(o,
+                            xmlname,
+                            {'ruby-class': "String",
+                             'pluginid': "rbenv"})
+        if optname and optname in data:
+            val = data[optname]
+        if type(val) == bool:
+            xe.text = str(val).lower()
+        else:
+            xe.text = val
+
+    ignore_local_class = 'FalseClass'
+
+    if 'ignore-local-version' in data:
+        ignore_local_string = str(data['ignore-local-version']).lower()
+        if ignore_local_string == 'true':
+            ignore_local_class = 'TrueClass'
+
+    XML.SubElement(o,
+                   'ignore__local__version',
+                   {'ruby-class': ignore_local_class,
+                    'pluginid': 'rbenv'})
+
+
 def build_name(parser, xml_parent, data):
     """yaml: build-name
     Set the name of the build
@@ -384,6 +499,39 @@ def inject(parser, xml_parent, data):
     jenkins_jobs.modules.base.add_nonblank_xml_subelement(
         info, 'scriptContent', data.get('script-content'))
     XML.SubElement(info, 'loadFilesFromMaster').text = 'false'
+
+
+def inject_passwords(parser, xml_parent, data):
+    """yaml: inject-passwords
+    Inject passwords to the build as environment variables.
+    Requires the Jenkins `EnvInject Plugin.
+    <https://wiki.jenkins-ci.org/display/JENKINS/EnvInject+Plugin>`_
+
+    :arg bool global: inject global passwords to the job
+    :arg list job-passwords: key value pair of job passwords
+
+        :Parameter: * **name** (`str`) Name of password
+                    * **password** (`str`) Encrypted password
+
+    Example::
+
+      wrappers:
+        - inject-passwords:
+            global: true
+            job-passwords:
+              - name: ADMIN
+                password: 0v8ZCNaHwq1hcx+sHwRLdg9424uBh4Pin0zO4sBIb+U=
+    """
+    eib = XML.SubElement(xml_parent, 'EnvInjectPasswordWrapper')
+    XML.SubElement(eib, 'injectGlobalPasswords').text = \
+        str(data.get('global', False)).lower()
+    entries = XML.SubElement(eib, 'passwordEntries')
+    passwords = data.get('job-passwords', [])
+    if passwords:
+        for password in passwords:
+            entry = XML.SubElement(entries, 'EnvInjectPasswordEntry')
+            XML.SubElement(entry, 'name').text = password['name']
+            XML.SubElement(entry, 'value').text = password['password']
 
 
 def env_file(parser, xml_parent, data):
@@ -626,7 +774,7 @@ def sauce_ondemand(parser, xml_parent, data):
         XML.SubElement(info, 'isWebDriver').text = 'false'
         XML.SubElement(sauce, 'seleniumBrowsers',
                        {'reference': '../seleniumInformation/'
-                       'seleniumBrowsers'})
+                        'seleniumBrowsers'})
     if atype == 'webdriver':
         browsers = XML.SubElement(info, 'webDriverBrowsers')
         for platform in data['platforms']:
@@ -634,7 +782,7 @@ def sauce_ondemand(parser, xml_parent, data):
         XML.SubElement(info, 'isWebDriver').text = 'true'
         XML.SubElement(sauce, 'webDriverBrowsers',
                        {'reference': '../seleniumInformation/'
-                       'webDriverBrowsers'})
+                        'webDriverBrowsers'})
     XML.SubElement(sauce, 'launchSauceConnectOnSlave').text = str(data.get(
         'launch-sauce-connect-on-slave', False)).lower()
     protocol = data.get('https-protocol', '')
@@ -747,6 +895,94 @@ def jira_create_release_notes(parser, xml_parent, data):
         data['release'])
     XML.SubElement(twrapper, 'jiraFilter').text = str(
         data.get('filter', 'status in (Resolved, Closed)'))
+
+def logstash(parser, xml_parent, data):
+    """yaml: logstash build wrapper
+    Dump the Jenkins console output to Logstash
+    Requires the Jenkins `logstash plugin.
+    <https://wiki.jenkins-ci.org/display/JENKINS/Logstash+Plugin>`_
+
+    :arg use-redis: Boolean to use Redis. (default: true)
+    :arg redis: Redis config params
+
+        :Parameter: * **host** (`str`) Redis hostname\
+        (default 'localhost')
+        :Parameter: * **port** (`int`) Redis port number (default 6397)
+        :Parameter: * **database-number** (`int`)\
+        Redis database number (default 0)
+        :Parameter: * **database-password** (`str`)\
+        Redis database password (default '')
+        :Parameter: * **data-type** (`str`)\
+        Redis database type (default 'list')
+        :Parameter: * **key** (`str`) Redis key (default 'logstash')
+
+    Example:
+
+    .. literalinclude:: /../../tests/wrappers/fixtures/logstash001.yaml
+
+    """
+    logstash = XML.SubElement(xml_parent,
+                              'jenkins.plugins.logstash.'
+                              'LogstashBuildWrapper')
+    logstash.set('plugin', 'logstash@0.8.0')
+
+    redis_bool = XML.SubElement(logstash, 'useRedis')
+    redis_bool.text = str(data.get('use-redis', True)).lower()
+
+    if data.get('use-redis'):
+        redis_config = data.get('redis', {})
+        redis_sub_element = XML.SubElement(logstash, 'redis')
+
+        host_sub_element = XML.SubElement(redis_sub_element, 'host')
+        host_sub_element.text = str(
+            redis_config.get('host', 'localhost'))
+
+        port_sub_element = XML.SubElement(redis_sub_element, 'port')
+        port_sub_element.text = str(redis_config.get('port', '6379'))
+
+        database_numb_sub_element = XML.SubElement(redis_sub_element, 'numb')
+        database_numb_sub_element.text = \
+            str(redis_config.get('database-number', '0'))
+
+        database_pass_sub_element = XML.SubElement(redis_sub_element, 'pass')
+        database_pass_sub_element.text = \
+            str(redis_config.get('database-password', ''))
+
+        data_type_sub_element = XML.SubElement(redis_sub_element, 'dataType')
+        data_type_sub_element.text = \
+            str(redis_config.get('data-type', 'list'))
+
+        key_sub_element = XML.SubElement(redis_sub_element, 'key')
+        key_sub_element.text = str(redis_config.get('key', 'logstash'))
+
+
+def delivery_pipeline(parser, xml_parent, data):
+    """yaml: delivery-pipeline
+    If enabled the job will create a version based on the template.
+    The version will be set to the environment variable PIPELINE_VERSION and
+    will also be set in the downstream jobs.
+
+    Requires the Jenkins `Delivery Pipeline Plugin.
+    <https://wiki.jenkins-ci.org/display/JENKINS/Delivery+Pipeline+Plugin>`_
+
+    :arg str version-template: Template for generated version e.g
+        1.0.${BUILD_NUMBER} (default: '')
+    :arg bool set-display-name: Set the generated version as the display name
+        for the build (default: false)
+
+    Example:
+
+    .. literalinclude:: /../../tests/wrappers/fixtures/delivery-pipeline1.yaml
+
+    """
+    pvc = XML.SubElement(xml_parent,
+                         'se.diabol.jenkins.pipeline.'
+                         'PipelineVersionContributor')
+    XML.SubElement(pvc, 'versionTemplate').text = data.get(
+        'version-template', '')
+    XML.SubElement(pvc, 'updateDisplayName').text = str(data.get(
+        'set-display-name', False)).lower()
+
 
 class Wrappers(jenkins_jobs.modules.base.Base):
     sequence = 80

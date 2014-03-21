@@ -17,8 +17,18 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+import codecs
 import os
 import re
+import doctest
+import testtools
+import xml.etree.ElementTree as XML
+import yaml
+from jenkins_jobs.builder import XmlJob, YamlParser, ModuleRegistry
+from jenkins_jobs.modules import (project_flow,
+                                  project_matrix,
+                                  project_maven,
+                                  project_multijob)
 
 
 def get_scenarios(fixtures_path):
@@ -35,7 +45,7 @@ def get_scenarios(fixtures_path):
         # Make sure the yaml file has a xml counterpart
         if xml_candidate not in files:
             raise Exception(
-                "No XML file named '%s' to match " +
+                "No XML file named '%s' to match "
                 "YAML file '%s'" % (xml_candidate, yaml_filename))
 
         scenarios.append((yaml_filename, {
@@ -43,3 +53,61 @@ def get_scenarios(fixtures_path):
         }))
 
     return scenarios
+
+
+class BaseTestCase(object):
+    scenarios = []
+    fixtures_path = None
+
+    # TestCase settings:
+    maxDiff = None      # always dump text difference
+    longMessage = True  # keep normal error message when providing our
+
+    def __read_content(self):
+        # Read XML content, assuming it is unicode encoded
+        xml_filepath = os.path.join(self.fixtures_path, self.xml_filename)
+        xml_content = u"%s" % codecs.open(xml_filepath, 'r', 'utf-8').read()
+
+        yaml_filepath = os.path.join(self.fixtures_path, self.yaml_filename)
+        with file(yaml_filepath, 'r') as yaml_file:
+            yaml_content = yaml.load(yaml_file)
+
+        return (yaml_content, xml_content)
+
+    def test_yaml_snippet(self):
+        if not self.xml_filename or not self.yaml_filename:
+            return
+
+        yaml_content, expected_xml = self.__read_content()
+        project = None
+        if ('project-type' in yaml_content):
+            if (yaml_content['project-type'] == "maven"):
+                project = project_maven.Maven(None)
+            elif (yaml_content['project-type'] == "matrix"):
+                project = project_matrix.Matrix(None)
+            elif (yaml_content['project-type'] == "flow"):
+                project = project_flow.Flow(None)
+            elif (yaml_content['project-type'] == "multijob"):
+                project = project_multijob.MultiJob(None)
+
+        if project:
+            xml_project = project.root_xml(yaml_content)
+        else:
+            xml_project = XML.Element('project')
+        parser = YamlParser()
+        pub = self.klass(ModuleRegistry({}))
+
+        # Generate the XML tree directly with modules/general
+        pub.gen_xml(parser, xml_project, yaml_content)
+
+        # Prettify generated XML
+        pretty_xml = unicode(XmlJob(xml_project, 'fixturejob').output(),
+                             'utf-8')
+
+        self.assertThat(
+            pretty_xml,
+            testtools.matchers.DocTestMatches(expected_xml,
+                                              doctest.ELLIPSIS |
+                                              doctest.NORMALIZE_WHITESPACE |
+                                              doctest.REPORT_NDIFF)
+        )
