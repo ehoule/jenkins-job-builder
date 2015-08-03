@@ -34,6 +34,7 @@ import copy
 import traceback
 import sys
 import imp
+import pprint
 
 logger = logging.getLogger(__name__)
 MAGIC_MANAGE_STRING = "<!-- Managed by Jenkins Job Builder -->"
@@ -60,7 +61,7 @@ def format_item(item, paramdict, eval_params):
         except Exception as e:
             print traceback.format_exc()
             desc = "Got exception trying to evaluate expression: %s\nParams are %s" % (
-                   evalstr, eval_params)
+                   evalstr, pprint.PrettyPrinter(indent=2).pprint(eval_params))
             raise JenkinsJobsException(desc)
     return ret
 

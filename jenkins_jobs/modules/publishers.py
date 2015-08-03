@@ -31,6 +31,7 @@ from jenkins_jobs.errors import JenkinsJobsException
 import logging
 import sys
 import random
+import builders
 
 
 def archive(parser, xml_parent, data):
@@ -3465,6 +3466,48 @@ def ruby_metrics(parser, xml_parent, data):
                 XML.SubElement(el, elname).text = str(threshold_value)
     else:
         raise JenkinsJobsException('Coverage metric targets must be set')
+
+
+def flexible_publish(parser, xml_parent, data):
+    """yaml: flexible-publish
+    This plugins makes it possible to execute builders as publisher steps or the opposite.
+    
+    Requires the Jenkins `Flexible Publish Plugin
+    <https://wiki.jenkins-ci.org/display/JENKINS/Flexible+Publish+Plugin>`_
+
+    Conditions are the same as the conditional-step builder.
+
+    Example::
+
+      publishers:
+        - flexible-publish:
+            - conditional-publisher:
+                condition:
+                    condition-kind: always
+                action:
+                    shell: test
+    """
+    tag = XML.SubElement(xml_parent, 'org.jenkins__ci.plugins.flexible__publish.FlexiblePublisher')
+    tag.set('plugin', 'flexible-publish@0.12')
+    publishers_tag = XML.SubElement(tag, 'publishers')
+    for step in data:
+        step_tag = XML.SubElement(publishers_tag, 'org.jenkins__ci.plugins.flexible__publish.ConditionalPublisher')
+        condition = step['conditional-publisher']['condition']
+        ctag = builders.build_condition(condition, step_tag, 'condition')
+        ctag.set('plugin', 'run-condition@1.0')
+        action = step['conditional-publisher']['action']
+        dummy_parent = XML.Element("dummy")
+        try:
+            parser.registry.dispatch('publisher', parser, dummy_parent, action)
+        except Exception as e:
+            parser.registry.dispatch('builder', parser, dummy_parent, action)
+        for node in list(dummy_parent):
+            node.set('class', node.tag)
+            node.tag = 'publisher'
+            step_tag.append(node)
+        runner_tag = XML.SubElement(step_tag, 'runner')
+        runner_tag.set('class', 'org.jenkins_ci.plugins.run_condition.BuildStepRunner$Fail')
+        runner_tag.set('plugin', 'run-condition@1.0')
 
 
 class Publishers(jenkins_jobs.modules.base.Base):

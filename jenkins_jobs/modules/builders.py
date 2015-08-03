@@ -565,9 +565,102 @@ def msbuild(parser, xml_parent, data):
 
 def create_builders(parser, step):
     dummy_parent = XML.Element("dummy")
-    parser.registry.dispatch('builder', parser, dummy_parent, step)
+    try:
+        parser.registry.dispatch('builder', parser, dummy_parent, step)
+    except Exception as e:
+        parser.registry.dispatch('publisher', parser, dummy_parent, step)
     return list(dummy_parent)
 
+def build_condition(cdata, parent_tag, condition_tag):
+    kind = cdata['condition-kind']
+    ctag = XML.SubElement(parent_tag, condition_tag)
+    if kind == "always":
+        ctag.set('class',
+                 'org.jenkins_ci.plugins.run_condition.core.AlwaysRun')
+    elif kind == "never":
+        ctag.set('class',
+                 'org.jenkins_ci.plugins.run_condition.core.NeverRun')
+    elif kind == "boolean-expression":
+        ctag.set('class',
+                 'org.jenkins_ci.plugins.run_condition.core.'
+                 'BooleanCondition')
+        XML.SubElement(ctag, "token").text = cdata['condition-expression']
+    elif kind == "current-status":
+        ctag.set('class',
+                 'org.jenkins_ci.plugins.run_condition.core.'
+                 'StatusCondition')
+        wr = XML.SubElement(ctag, 'worstResult')
+        wr_name = cdata['condition-worst']
+        if wr_name not in hudson_model.THRESHOLDS:
+            raise JenkinsJobsException(
+                "threshold must be one of %s" %
+                ", ".join(hudson_model.THRESHOLDS.keys()))
+        wr_threshold = hudson_model.THRESHOLDS[wr_name]
+        XML.SubElement(wr, "name").text = wr_threshold['name']
+        XML.SubElement(wr, "ordinal").text = wr_threshold['ordinal']
+        XML.SubElement(wr, "color").text = wr_threshold['color']
+        XML.SubElement(wr, "completeBuild").text = \
+            str(wr_threshold['complete']).lower()
+
+        br = XML.SubElement(ctag, 'bestResult')
+        br_name = cdata['condition-best']
+        if not br_name in hudson_model.THRESHOLDS:
+            raise JenkinsJobsException(
+                "threshold must be one of %s" %
+                ", ".join(hudson_model.THRESHOLDS.keys()))
+        br_threshold = hudson_model.THRESHOLDS[br_name]
+        XML.SubElement(br, "name").text = br_threshold['name']
+        XML.SubElement(br, "ordinal").text = br_threshold['ordinal']
+        XML.SubElement(br, "color").text = br_threshold['color']
+        XML.SubElement(br, "completeBuild").text = \
+            str(wr_threshold['complete']).lower()
+    elif kind == "shell":
+        ctag.set('class',
+                 'org.jenkins_ci.plugins.run_condition.contributed.'
+                 'ShellCondition')
+        XML.SubElement(ctag, "command").text = cdata['condition-command']
+    elif kind == "windows-shell":
+        ctag.set('class',
+                 'org.jenkins_ci.plugins.run_condition.contributed.'
+                 'BatchFileCondition')
+        XML.SubElement(ctag, "command").text = cdata['condition-command']
+    elif kind == "file-exists":
+        ctag.set('class',
+                 'org.jenkins_ci.plugins.run_condition.core.'
+                 'FileExistsCondition')
+        XML.SubElement(ctag, "file").text = cdata['condition-filename']
+        basedir = cdata.get('condition-basedir', 'workspace')
+        basedir_tag = XML.SubElement(ctag, "baseDir")
+        if "workspace" == basedir:
+            basedir_tag.set('class',
+                            'org.jenkins_ci.plugins.run_condition.common.'
+                            'BaseDirectory$Workspace')
+        elif "artifact-directory" == basedir:
+            basedir_tag.set('class',
+                            'org.jenkins_ci.plugins.run_condition.common.'
+                            'BaseDirectory$ArtifactsDir')
+        elif "jenkins-home" == basedir:
+            basedir_tag.set('class',
+                            'org.jenkins_ci.plugins.run_condition.common.'
+                            'BaseDirectory$JenkinsHome')
+    elif kind == "strings-match":
+        ctag.set('class',
+                 'org.jenkins_ci.plugins.run_condition.core.'
+                 'StringsMatchCondition')
+        XML.SubElement(ctag, "arg1").text = cdata['condition-arg-1']
+        XML.SubElement(ctag, "arg2").text = cdata['condition-arg-2']
+        XML.SubElement(ctag, "ignoreCase").text = cdata.get('condition-ignore-case', 'false')
+    elif kind == "regex-match":
+        ctag.set('class',
+                 'org.jenkins_ci.plugins.run_condition.core.'
+                 'ExpressionCondition')
+        XML.SubElement(ctag, "expression").text = cdata['condition-expression']
+        XML.SubElement(ctag, "label").text = cdata['condition-label']
+    elif kind == "not":
+        ctag.set('class',
+                 'org.jenkins_ci.plugins.run_condition.logic.Not')
+        build_condition(cdata['negated-condition'], ctag, "condition")
+    return ctag
 
 def conditional_step(parser, xml_parent, data):
     """yaml: conditional-step
@@ -627,6 +720,12 @@ def conditional_step(parser, xml_parent, data):
                          :condition-arg-1: First string
                          :condition-arg-2: Second string
                          :condition-ignore-case: Ignore the case of the strings when matching them (default: false)
+
+    regex-match        Run if the two strings are the same
+    
+                         :expression: Expression
+                         :label: Value
+                         
     not                Logical not. Invert the result of the selected condition. Will run if the selected condition would not run.
     
                          :negated-condition: Condition to negate
@@ -637,90 +736,6 @@ def conditional_step(parser, xml_parent, data):
     .. literalinclude:: \
     /../../tests/builders/fixtures/conditional-step-success-failure.yaml
     """
-    def build_condition(cdata, parent_tag, condition_tag):
-        kind = cdata['condition-kind']
-        ctag = XML.SubElement(parent_tag, condition_tag)
-        if kind == "always":
-            ctag.set('class',
-                     'org.jenkins_ci.plugins.run_condition.core.AlwaysRun')
-        elif kind == "never":
-            ctag.set('class',
-                     'org.jenkins_ci.plugins.run_condition.core.NeverRun')
-        elif kind == "boolean-expression":
-            ctag.set('class',
-                     'org.jenkins_ci.plugins.run_condition.core.'
-                     'BooleanCondition')
-            XML.SubElement(ctag, "token").text = cdata['condition-expression']
-        elif kind == "current-status":
-            ctag.set('class',
-                     'org.jenkins_ci.plugins.run_condition.core.'
-                     'StatusCondition')
-            wr = XML.SubElement(ctag, 'worstResult')
-            wr_name = cdata['condition-worst']
-            if wr_name not in hudson_model.THRESHOLDS:
-                raise JenkinsJobsException(
-                    "threshold must be one of %s" %
-                    ", ".join(hudson_model.THRESHOLDS.keys()))
-            wr_threshold = hudson_model.THRESHOLDS[wr_name]
-            XML.SubElement(wr, "name").text = wr_threshold['name']
-            XML.SubElement(wr, "ordinal").text = wr_threshold['ordinal']
-            XML.SubElement(wr, "color").text = wr_threshold['color']
-            XML.SubElement(wr, "completeBuild").text = \
-                str(wr_threshold['complete']).lower()
-
-            br = XML.SubElement(ctag, 'bestResult')
-            br_name = cdata['condition-best']
-            if not br_name in hudson_model.THRESHOLDS:
-                raise JenkinsJobsException(
-                    "threshold must be one of %s" %
-                    ", ".join(hudson_model.THRESHOLDS.keys()))
-            br_threshold = hudson_model.THRESHOLDS[br_name]
-            XML.SubElement(br, "name").text = br_threshold['name']
-            XML.SubElement(br, "ordinal").text = br_threshold['ordinal']
-            XML.SubElement(br, "color").text = br_threshold['color']
-            XML.SubElement(br, "completeBuild").text = \
-                str(wr_threshold['complete']).lower()
-        elif kind == "shell":
-            ctag.set('class',
-                     'org.jenkins_ci.plugins.run_condition.contributed.'
-                     'ShellCondition')
-            XML.SubElement(ctag, "command").text = cdata['condition-command']
-        elif kind == "windows-shell":
-            ctag.set('class',
-                     'org.jenkins_ci.plugins.run_condition.contributed.'
-                     'BatchFileCondition')
-            XML.SubElement(ctag, "command").text = cdata['condition-command']
-        elif kind == "file-exists":
-            ctag.set('class',
-                     'org.jenkins_ci.plugins.run_condition.core.'
-                     'FileExistsCondition')
-            XML.SubElement(ctag, "file").text = cdata['condition-filename']
-            basedir = cdata.get('condition-basedir', 'workspace')
-            basedir_tag = XML.SubElement(ctag, "baseDir")
-            if "workspace" == basedir:
-                basedir_tag.set('class',
-                                'org.jenkins_ci.plugins.run_condition.common.'
-                                'BaseDirectory$Workspace')
-            elif "artifact-directory" == basedir:
-                basedir_tag.set('class',
-                                'org.jenkins_ci.plugins.run_condition.common.'
-                                'BaseDirectory$ArtifactsDir')
-            elif "jenkins-home" == basedir:
-                basedir_tag.set('class',
-                                'org.jenkins_ci.plugins.run_condition.common.'
-                                'BaseDirectory$JenkinsHome')
-        elif kind == "strings-match":
-            ctag.set('class',
-                     'org.jenkins_ci.plugins.run_condition.core.'
-                     'StringsMatchCondition')
-            XML.SubElement(ctag, "arg1").text = cdata['condition-arg-1']
-            XML.SubElement(ctag, "arg2").text = cdata['condition-arg-2']
-            XML.SubElement(ctag, "ignoreCase").text = cdata.get('condition-ignore-case', 'false')
-        elif kind == "not":
-            ctag.set('class',
-                     'org.jenkins_ci.plugins.run_condition.logic.Not')
-            build_condition(cdata['negated-condition'], ctag, "condition")
-        return ctag
 
     def build_step(parent, step):
         for edited_node in create_builders(parser, step):

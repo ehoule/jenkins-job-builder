@@ -49,6 +49,7 @@ def git(self, xml_parent, data):
       when polling for changes. (if polling is enabled)
     :arg list(str) included-regions: list of file/folders to include
     :arg list(str) excluded-regions: list of file/folders to exclude
+    :arg list(str) excluded-commit-messages: list of commit messages to exclude
     :arg str local-branch: Checkout/merge to local branch
     :arg dict merge:
         :merge:
@@ -150,12 +151,16 @@ def git(self, xml_parent, data):
         XML.SubElement(bspec, 'name').text = branch
     excluded_users = '\n'.join(data.get('excluded-users', []))
     XML.SubElement(scm, 'excludedUsers').text = excluded_users
+    extensions = XML.SubElement(scm, 'extensions')
     if 'included-regions' in data:
         include_string = '\n'.join(data['included-regions'])
         XML.SubElement(scm, 'includedRegions').text = include_string
     if 'excluded-regions' in data:
         exclude_string = '\n'.join(data['excluded-regions'])
         XML.SubElement(scm, 'excludedRegions').text = exclude_string
+    if 'excluded-commit-messages' in data:
+        for message in data['excluded-commit-messages']:
+            XML.SubElement(XML.SubElement(extensions, 'hudson.plugins.git.extensions.impl.MessageExclusion'), 'excludedMessage').text = message
     if 'merge' in data:
         merge = data['merge']
         name = merge.get('remote', 'origin')
@@ -284,6 +289,14 @@ def repo(self, xml_parent, data):
             xe.text = str(val)
 
 
+def create_location(locations, repo):
+    module = XML.SubElement(locations,
+                            'hudson.scm.SubversionSCM_-ModuleLocation')
+    XML.SubElement(module, 'remote').text = repo['url']
+    XML.SubElement(module, 'local').text = repo.get('basedir', '.')
+    if 'credentials-id' in repo:
+        XML.SubElement(module, 'credentialsId').text = repo['credentials-id']
+
 def svn(self, xml_parent, data):
     """yaml: svn
     Specifies the svn SCM repository for this job.
@@ -291,6 +304,7 @@ def svn(self, xml_parent, data):
     :arg str url: URL of the svn repository
     :arg str basedir: location relative to the workspace root to checkout to
       (default '.')
+    :arg str credentials-id: credentials id to use (optional)
     :arg str workspaceupdater: optional argument to specify
       how to update the workspace (default wipeworkspace)
     :arg list repos: list of repositories to checkout (optional)
@@ -298,7 +312,12 @@ def svn(self, xml_parent, data):
       :Repo: * **url** (`str`) -- URL for the repository
              * **basedir** (`str`) -- Location relative to the workspace
                                       root to checkout to (default '.')
+             * **credentials-id** (`str`) -- Credentials id to use (optional)
     :arg str excluded-commit-messages: If set, and Jenkins is set to poll for changes, Jenkins will ignore any revisions with commit messages containing any of the given regular expressions when determining if a build needs to be triggered
+    :arg list additional-credentials: list of additional credentials
+
+      :Additional Credential: * **realm** (`str`) -- Realm of the repository
+                              * **credentials-id** (`str`) -- Credentials id to use
 
     :workspaceupdater values:
              :wipeworkspace: - deletes the workspace before checking out
@@ -323,15 +342,9 @@ def svn(self, xml_parent, data):
     if 'repos' in data:
         repos = data['repos']
         for repo in repos:
-            module = XML.SubElement(locations,
-                                    'hudson.scm.SubversionSCM_-ModuleLocation')
-            XML.SubElement(module, 'remote').text = repo['url']
-            XML.SubElement(module, 'local').text = repo.get('basedir', '.')
+            create_location(locations, repo)
     elif 'url' in data:
-        module = XML.SubElement(locations,
-                                'hudson.scm.SubversionSCM_-ModuleLocation')
-        XML.SubElement(module, 'remote').text = data['url']
-        XML.SubElement(module, 'local').text = data.get('basedir', '.')
+        create_location(locations, data)
     else:
         raise JenkinsJobsException("A top level url or repos list must exist")
     updater = data.get('workspaceupdater', 'wipeworkspace')
@@ -348,7 +361,14 @@ def svn(self, xml_parent, data):
     
     if 'excluded-commit-messages' in data:
         XML.SubElement(scm, 'excludedCommitMessages').text = data['excluded-commit-messages']
-
+        
+    if 'additional-credentials' in data:
+        additionalCredentialsNode = XML.SubElement(scm, 'additionalCredentials')
+        for additionCredential in data['additional-credentials']:
+            additionCredentialNode = XML.SubElement(additionalCredentialsNode, 'hudson.scm.SubversionSCM_-AdditionalCredentials')
+            XML.SubElement(additionCredentialNode, 'realm').text = additionCredential['realm']
+            XML.SubElement(additionCredentialNode, 'credentialsId').text = additionCredential['credentials-id']
+        
 
 def tfs(self, xml_parent, data):
     """yaml: tfs
